@@ -114,6 +114,8 @@ input:focus,select:focus{outline:none;border-color:var(--rose)}
 .msg{font-size:12px;margin-top:10px;padding:11px 13px;border-radius:11px;line-height:1.5;display:none}
 .msg.warn{display:block;background:rgba(231,192,138,.1);border:1px solid rgba(231,192,138,.25);color:var(--gold)}
 .spin{width:13px;height:13px;border:2px solid rgba(231,192,138,.3);border-top-color:var(--gold);border-radius:50%;animation:rot .7s linear infinite;flex:0 0 auto}
+.manual-fields{transition:opacity .3s,max-height .3s;max-height:300px;overflow:hidden}
+.manual-fields.hidden{opacity:0;max-height:0;pointer-events:none}
 @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 @keyframes rot{to{transform:rotate(360deg)}}
 </style>
@@ -154,16 +156,18 @@ input:focus,select:focus{outline:none;border-color:var(--rose)}
 <div class="sheet" id="sheet">
   <div class="grip"></div>
   <h2>Adicionar série</h2>
-  <p class="hint">Escreve o nome. Se tiveres a pesquisa online ativa, eu procuro a capa e a sinopse; senão, adicionas à mão.</p>
+  <p class="hint">Escreve o nome → escolhe da lista → toca em <b style="color:var(--gold)">Guardar série</b>. A data e as informações são preenchidas automaticamente.</p>
   <input id="fName" placeholder="Nome da série ou filme…" autocomplete="off">
   <div class="searching" id="fSearching"><span class="spin"></span> a procurar…</div>
   <div class="suggests" id="fSuggests"></div>
   <div id="fMsg"></div>
+  <div class="manual-fields hidden" id="manualFields">
   <label>O que estreia</label>
   <input id="fWhat" placeholder="Ex: Temporada 3" autocomplete="off">
   <div class="row">
-    <div><label>Data (opcional)</label><input id="fDate" type="date"></div>
+    <div><label>Data</label><input id="fDate" type="date"></div>
     <div><label>Plataforma</label><select id="fPlat"><option value="prime">Prime Video</option><option value="netflix">Netflix</option><option value="other">Outra</option></select></div>
+  </div>
   </div>
   <button class="save" id="saveManual">Guardar série</button>
 </div>
@@ -517,7 +521,15 @@ const sheet=document.getElementById('sheet'),sheetBg=document.getElementById('sh
 const fName=document.getElementById('fName'),fSug=document.getElementById('fSuggests'),fSearch=document.getElementById('fSearching'),fMsg=document.getElementById('fMsg');
 let chosen=null;
 function openSheet(){sheet.classList.add('on');sheetBg.classList.add('on');setTimeout(()=>fName.focus(),300);}
-function closeSheet(){sheet.classList.remove('on');sheetBg.classList.remove('on');fName.value='';fSug.innerHTML='';fMsg.className='msg';fMsg.className='msg';chosen=null;document.getElementById('fWhat').value='';document.getElementById('fDate').value='';}
+function closeSheet(){
+  sheet.classList.remove('on'); sheetBg.classList.remove('on');
+  fName.value=''; fSug.innerHTML=''; fMsg.className='msg'; chosen=null;
+  fSearch.style.display='none';
+  const mf=document.getElementById('manualFields');
+  if(mf) mf.classList.add('hidden');
+  const fw=document.getElementById('fWhat'); if(fw) fw.value='';
+  const fd=document.getElementById('fDate'); if(fd) fd.value='';
+}
 document.getElementById('fab').addEventListener('click',openSheet);
 sheetBg.addEventListener('click',closeSheet);
 
@@ -525,7 +537,10 @@ let searchT=null;
 fName.addEventListener('input',()=>{
   clearTimeout(searchT); chosen=null; const q=fName.value.trim();
   fSug.innerHTML=''; fMsg.className='msg';
-  if(!TMDB){ if(q.length>0){fMsg.className='msg warn';fMsg.textContent='Sem pesquisa online. Preenche os campos abaixo e toca em Guardar série. (Ativa no ⚙ para encontrar capas automaticamente.)';} fSearch.style.display='none'; return; }
+  if(!TMDB){ if(q.length>0){fMsg.className='msg warn';fMsg.textContent='Sem pesquisa online — preenche os campos abaixo. (Ativa no ⚙ com a chave TMDB.)';}
+    const mf0=document.getElementById('manualFields'); if(mf0) mf0.classList.remove('hidden');
+    fSearch.style.display='none'; return; }
+  const mf1=document.getElementById('manualFields'); if(mf1) mf1.classList.add('hidden');
   if(q.length<2){fSearch.style.display='none';return;}
   fSearch.style.display='flex';
   searchT=setTimeout(async()=>{
@@ -539,25 +554,104 @@ fName.addEventListener('input',()=>{
       el.innerHTML=`<div class="thumb" style="background:${grad((r.id*47)%360)}">${p?'<img>':'🎬'}</div>
         <div class="info"><div class="st">${r.name||r.title}</div><div class="sy">${r.media_type==='tv'?'Série':'Filme'}${yr?' · '+yr:''}</div></div>`;
       if(p){const im=el.querySelector('img');im.src=p;}
-      el.addEventListener('click',()=>{ chosen=r; fName.value=r.name||r.title; fSug.innerHTML=''; document.getElementById('fWhat').focus(); });
+      el.addEventListener('click',()=>{
+        chosen=r; fName.value=r.name||r.title; fSug.innerHTML=''; fMsg.className='msg';
+        const whatEl=document.getElementById('fWhat');
+        if(!whatEl.value) whatEl.value = r.media_type==='movie' ? 'Filme' : 'Nova Temporada';
+        fMsg.className='msg warn';
+        fMsg.innerHTML='✅ Encontrada! Toca em <b>Guardar série</b> — a data é detectada automaticamente.';
+        const mff=document.getElementById('manualFields');
+        if(mff) mff.classList.add('hidden');
+      });
       fSug.appendChild(el);
     });
   },380);
 });
 
+
+// Datas conhecidas para séries com data confirmada (por TMDB id)
+const KNOWN_DATES={
+  1477317:{date:'2026-06-17',dateExact:true,what:'Filme (Your Fault: London)',plat:'prime'}, // Your Fault London
+};
 document.getElementById('saveManual').addEventListener('click',async()=>{
   const name=fName.value.trim(); if(!name){alert('Escreve o nome da série.');return;}
-  const what=document.getElementById('fWhat').value.trim()||'Nova temporada';
-  const date=document.getElementById('fDate').value;
-  const plat=document.getElementById('fPlat').value;
   const hue=Math.floor(Math.random()*360);
   let show;
   if(chosen){
-    show={id:'t'+chosen.id,plat,what,date,dateExact:!!date,title:chosen.name||chosen.title,
-      tmdb:{id:chosen.id,type:chosen.media_type},poster:chosen.poster_path?img(chosen.poster_path,'w500'):null,
-      backdrop:chosen.backdrop_path?img(chosen.backdrop_path,'w780'):null,hue,emoji:'🎬',
-      genres:[],cast:[],synopsis:chosen.overview||'',note:''};
+    // Mostrar loading
+    const btn=document.getElementById('saveManual');
+    btn.textContent='A carregar…'; btn.disabled=true;
+    try{
+      const d=await getDetails(chosen.id, chosen.media_type);
+      let date='', what='', dateExact=false, emoji='🎬';
+      if(chosen.media_type==='movie'){
+        // Filme: usa release_date
+        date=d&&d.release_date||'';
+        what='Filme';
+        emoji='🎬';
+        dateExact=true;
+      } else {
+        // Série TV: tenta next_episode_to_air primeiro
+        const nep=d&&d.next_episode_to_air;
+        const lep=d&&d.last_episode_to_air;
+        const numSeasons=d&&d.number_of_seasons||1;
+        if(nep && nep.air_date){
+          date=nep.air_date;
+          dateExact=true;
+          const sn=nep.season_number, en=nep.episode_number;
+          what=`Temporada ${sn}, Ep. ${en}`;
+          if(nep.name) what+=` — "${nep.name}"`;
+          emoji='📺';
+        } else if(lep){
+          // Sem próximo episódio — usar data do último e calcular próxima temporada
+          // ou mostrar TBA com a info da última temporada
+          const lastSeason=lep.season_number||numSeasons;
+          what=`Temporada ${lastSeason+1}`;
+          date=''; // TBA
+          emoji='⏳';
+        } else {
+          what=`Temporada ${numSeasons}`;
+          date='';
+          emoji='📺';
+        }
+        // Status hint
+        const status=d&&d.status;
+        if(status==='Ended'||status==='Canceled') emoji='🏁';
+      }
+      // Plataforma: detectar pelo nome comum ou deixar prime por defeito
+      const title=(chosen.name||chosen.title||'').toLowerCase();
+      let plat='prime';
+      if(d&&d.networks){
+        const nets=d.networks.map(n=>n.name.toLowerCase());
+        if(nets.some(n=>n.includes('netflix'))) plat='netflix';
+        else if(nets.some(n=>n.includes('disney')||n.includes('hulu'))) plat='other';
+        else if(nets.some(n=>n.includes('amazon')||n.includes('prime'))) plat='prime';
+      }
+      show={
+        id:'t'+chosen.id, plat, what, date, dateExact, emoji, hue,
+        title: d&&(d.name||d.title)||chosen.name||chosen.title,
+        tmdb:{id:chosen.id,type:chosen.media_type},
+        poster: d&&d.poster_path ? img(d.poster_path,'w500') : (chosen.poster_path?img(chosen.poster_path,'w500'):null),
+        backdrop: d&&d.backdrop_path ? img(d.backdrop_path,'w780') : null,
+        genres: d&&d.genres ? d.genres.map(g=>g.name) : [],
+        cast: [],
+        synopsis: d&&d.overview||chosen.overview||'',
+        note:''
+      };
+    } catch(e){
+      // Fallback sem detalhes
+      show={id:'t'+chosen.id,plat:'prime',what:'Nova Temporada',date:'',dateExact:false,
+        title:chosen.name||chosen.title,tmdb:{id:chosen.id,type:chosen.media_type},
+        poster:chosen.poster_path?img(chosen.poster_path,'w500'):null,
+        backdrop:null,hue,emoji:'🎬',genres:[],cast:[],synopsis:chosen.overview||'',note:''};
+    } finally {
+      btn.textContent='Guardar série'; btn.disabled=false;
+    }
   } else {
+    // Adicionado à mão sem TMDB
+    const what=document.getElementById('fWhat').value.trim()||'Nova Temporada';
+    const date=document.getElementById('fDate').value;
+    const plat=document.getElementById('fPlat').value;
     show={id:'m'+Date.now(),plat,what,date,dateExact:!!date,title:name,tmdb:null,
       poster:null,hue,emoji:'❤',genres:[],cast:[],synopsis:'',note:''};
   }
